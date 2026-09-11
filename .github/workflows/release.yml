@@ -1,0 +1,39 @@
+name: Build Windows release
+on:
+  push:
+    branches: [main]
+    paths:
+      - '*.cs'
+      - build.ps1
+      - .github/workflows/release.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build application and package dependencies
+        shell: pwsh
+        run: ./build.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ImageZipMerger-v1.8
+          path: build/ImageZipMerger-v1.8.zip
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'v1.8'
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag build/ImageZipMerger-v1.8.zip --clobber
+          } else {
+            gh release create $tag build/ImageZipMerger-v1.8.zip --target "${{ github.sha }}" --title 'ImageZipMerger v1.8' --notes 'Windows 64비트 배포본입니다. ZIP을 모두 압축 해제한 뒤 ImageZipMerger.exe를 실행하세요. 이미지 라이브러리와 소스코드를 포함합니다.'
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }

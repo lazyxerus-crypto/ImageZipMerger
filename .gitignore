@@ -1,0 +1,5 @@
+.git-upload/
+build/
+node_modules/
+*.tmp
+*.pdb
