@@ -39,3 +39,14 @@ class EpisodeListBox : ListBox {
   finally {EndUpdate();}Invalidate();
  }
 }
+class PageListBox : System.Windows.Forms.ListBox {
+ public object[] DragSelection = new object[0];
+ protected override void WndProc(ref System.Windows.Forms.Message m) {
+  if(m.Msg==0x201) {
+   var p=new System.Drawing.Point(unchecked((short)((long)m.LParam&65535)),unchecked((short)(((long)m.LParam>>16)&65535)));
+   int i=IndexFromPoint(p);
+   DragSelection=i>=0 && GetSelected(i)?SelectedItems.Cast<object>().ToArray():new object[0];
+  }
+  base.WndProc(ref m);
+ }
+}
