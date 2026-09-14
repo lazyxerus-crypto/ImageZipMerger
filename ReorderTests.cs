@@ -44,6 +44,7 @@ class ReorderTests {
     Assert(original.SequenceEqual(File.ReadAllBytes(source)),"Source archive modified");
     form.Close();
    }
+   WorkflowTests.Run(dir,source);
    Console.WriteLine("PASS: button/multi-selection/boundaries/hidden excluded/drag/restore/scroll/export/source preservation");
   }finally{Directory.Delete(dir,true);}
  }

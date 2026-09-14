@@ -41,12 +41,16 @@ class EpisodeListBox : ListBox {
 }
 class PageListBox : System.Windows.Forms.ListBox {
  public object[] DragSelection = new object[0];
+ bool pendingClick;Message down;
+ public void CancelPendingClick(){pendingClick=false;}
  protected override void WndProc(ref System.Windows.Forms.Message m) {
   if(m.Msg==0x201) {
    var p=new System.Drawing.Point(unchecked((short)((long)m.LParam&65535)),unchecked((short)(((long)m.LParam>>16)&65535)));
-   int i=IndexFromPoint(p);
-   DragSelection=i>=0 && GetSelected(i)?SelectedItems.Cast<object>().ToArray():new object[0];
+   int i=IndexFromPoint(p);DragSelection=i>=0 && GetSelected(i)?SelectedItems.Cast<object>().ToArray():new object[0];
+   if(i>=0 && GetSelected(i) && ModifierKeys==Keys.None){Focus();pendingClick=true;down=m;Capture=true;OnMouseDown(new MouseEventArgs(MouseButtons.Left,1,p.X,p.Y,0));return;}
   }
+  if(m.Msg==0x202 && pendingClick){pendingClick=false;base.WndProc(ref down);}
+  if(m.Msg==0x215)pendingClick=false;
   base.WndProc(ref m);
  }
 }
