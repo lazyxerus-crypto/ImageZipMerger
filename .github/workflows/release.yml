@@ -1,15 +1,7 @@
-name: Build and test Windows application
-on:
-  push:
-    branches: [main]
-    paths:
-      - '*.cs'
-      - '*.ps1'
-      - 'assets/**'
-      - .github/workflows/release.yml
-  workflow_dispatch:
+name: Build and publish Windows release
+on: workflow_dispatch
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: windows-latest
@@ -26,6 +18,20 @@ jobs:
         run: ./build.ps1
       - uses: actions/upload-artifact@v4
         with:
-          name: ImageZipMerger-dev
-          path: build/ImageZipMerger-dev.zip
+          name: ImageZipMerger-v1.10
+          path: build/ImageZipMerger-v1.10.zip
           retention-days: 7
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'v1.10'
+          $file = 'build/ImageZipMerger-v1.10.zip'
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $file --clobber
+          } else {
+            gh release create $tag $file --target "${{ github.sha }}" --title 'ImageZipMerger v1.10' --notes '압축파일 추가 시 새 파일 묶음 이름순 정렬, 이미지 드래그 성능 개선, 색상 로그, 원본 덮어쓰기 후 작업 재연결, 새 앱 아이콘을 추가했습니다. Windows 64비트용입니다. ZIP을 모두 압축 해제한 뒤 ImageZipMerger.exe를 실행하세요.'
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }

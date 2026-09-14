@@ -4,9 +4,7 @@
 
 ## 실행
 
-[기존 정식 배포 v1.9](https://github.com/lazyxerus-crypto/ImageZipMerger/releases/tag/v1.9)
-
-현재 main은 아래 개선 사항이 적용된 **미출시 개발 버전**입니다. v1.9 다운로드에는 이 변경이 포함되지 않습니다.
+[최신 배포 다운로드](https://github.com/lazyxerus-crypto/ImageZipMerger/releases/latest)
 배포 ZIP을 모두 압축 해제하고 `ImageZipMerger.exe`를 실행하세요. 같은 폴더의 `libvips-42.dll`이 필요합니다.
 Windows 64비트, .NET Framework 4.5 이상을 지원합니다.
 
@@ -39,7 +37,7 @@ Windows PowerShell에서 `./test.ps1`로 순서·스크롤·정렬·미리보기
 
 아이콘 원본은 `assets/icon.png`, 다중 해상도 아이콘은 `assets/ImageZipMerger.ico`입니다. PNG에서 ICO를 재생성하려면 `./build-icon.ps1`을 실행합니다.
 
-GitHub Actions는 테스트와 개발 빌드만 수행합니다. 개발 ZIP 아티팩트는 7일 보관하고, 릴리스나 태그를 자동으로 생성·수정하지 않습니다.
+GitHub Actions는 테스트와 빌드를 수행하고 v1.10 배포 ZIP을 릴리스에 업로드합니다.
 
 ## 타사 구성요소
 

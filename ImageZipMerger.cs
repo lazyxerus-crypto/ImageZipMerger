@@ -43,7 +43,7 @@ class Merger : Form {
  Point pageDragStart; List<PageItem> draggedPages; Episode pageDragEpisode; int pageInsertAt=-1;
  readonly string pageDragFormat="ImageZipMerger.Page."+Guid.NewGuid().ToString("N");
  public Merger() {
-  Text="이미지 ZIP 합치기 (개발 버전)"; Size=new Size(1180,800); MinimumSize=new Size(950,620); Font=new Font("맑은 고딕",10); StartPosition=FormStartPosition.CenterScreen; BackColor=Color.FromArgb(245,247,250); AutoScaleMode=AutoScaleMode.Font;
+  Text="이미지 ZIP 합치기 v1.10"; Size=new Size(1180,800); MinimumSize=new Size(950,620); Font=new Font("맑은 고딕",10); StartPosition=FormStartPosition.CenterScreen; BackColor=Color.FromArgb(245,247,250); AutoScaleMode=AutoScaleMode.Font;
   var root=new TableLayoutPanel { Dock=DockStyle.Fill, RowCount=4, ColumnCount=1, Padding=new Padding(12) };
   root.RowStyles.Add(new RowStyle(SizeType.Absolute,48)); root.RowStyles.Add(new RowStyle(SizeType.Percent,100)); root.RowStyles.Add(new RowStyle(SizeType.Absolute,32));root.RowStyles.Add(new RowStyle(SizeType.Absolute,84)); Controls.Add(root);
   var top=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false}; root.Controls.Add(top,0,0);
