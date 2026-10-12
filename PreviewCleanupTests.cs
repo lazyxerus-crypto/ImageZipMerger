@@ -249,9 +249,11 @@ static class PreviewCleanupTests {
     int w2,h2;
     using(var form=new Merger()){
      form.ShowInTaskbar=false;form.Opacity=0;form.Show();PumpLayout(form);
-     Assert(form.Width==w1&&form.Height==h1,"Saved size must be stable across restarts");
-     form.Size=new Size(1100,h1);PumpLayout(form);
-     Assert(form.Width==1100,"Resize must apply");
+     Assert(form.Width==w1&&form.Height==h1,"Saved size must be stable across restarts, got "+form.Width+"x"+form.Height);
+     Rectangle rarea=Screen.FromControl(form).WorkingArea;
+     int targetW=Math.Max(Math.Min(1100,rarea.Width),form.MinimumSize.Width);
+     form.Size=new Size(targetW,h1);PumpLayout(form);
+     Assert(form.Width==targetW,"Resize must apply, got "+form.Width+"x"+form.Height+" target="+targetW+" area="+rarea);
      w2=form.Width;h2=form.Height;
      Rectangle area2=Screen.FromControl(form).WorkingArea;Size min2=form.MinimumSize;
      form.Close();
