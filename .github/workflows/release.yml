@@ -1,5 +1,9 @@
 name: Build and publish Windows release
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v1.11'
 permissions:
   contents: write
 jobs:
