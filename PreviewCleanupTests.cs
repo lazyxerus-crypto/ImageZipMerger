@@ -15,6 +15,8 @@ static class PreviewCleanupTests {
  static void Assert(bool ok,string message){if(!ok)throw new Exception(message);}
  static int UndoCount(Merger m){var u=Field(m,"undo");return (int)u.GetType().GetProperty("Count").GetValue(u,null);}
  static void PumpLayout(Form f){for(int i=0;i<4;i++)f.PerformLayout();}
+ static void Settle(Form f){for(int i=0;i<10;i++){f.PerformLayout();Application.DoEvents();}}
+ static void Maximize(Form f){for(int i=0;i<50&&(f.WindowState!=FormWindowState.Maximized||f.RestoreBounds.Width<1);i++){try{f.WindowState=FormWindowState.Maximized;}catch{}Application.DoEvents();}}
  static void ExpectClamped(int reqW,int reqH,Form form,Rectangle area,out int ew,out int eh){ExpectClamped(reqW,reqH,form.MinimumSize.Width,form.MinimumSize.Height,area,out ew,out eh);}
  static void ExpectClamped(int reqW,int reqH,int minW,int minH,Rectangle area,out int ew,out int eh){ew=AppSettings.ClampSize(reqW,minW,area.Width);eh=AppSettings.ClampSize(reqH,minH,area.Height);}
  // What a restored form actually shows: WinForms coerces below-minimum sizes up to MinimumSize.
@@ -260,7 +262,8 @@ static class PreviewCleanupTests {
     int bw=rp.Width,bh=rp.Height;
     using(var form=new Merger()){
      form.ShowInTaskbar=false;form.Opacity=0;form.Show();PumpLayout(form);
-     form.WindowState=FormWindowState.Maximized;PumpLayout(form);form.Close();
+     Maximize(form);PumpLayout(form);
+     form.Close();
     }
     rp=AppSettings.LoadWindowPlacementFrom(iso);
     Assert(rp.Maximized,"Maximized must be saved on close");
@@ -270,6 +273,7 @@ static class PreviewCleanupTests {
      // and drops a ctor-restored maximized state (test-only artifact; the
      // real app never changes ShowInTaskbar).
      form.Opacity=0;form.Show();PumpLayout(form);
+     for(int i=0;i<50&&form.WindowState!=FormWindowState.Maximized;i++)Application.DoEvents();
      Assert(form.WindowState==FormWindowState.Maximized,"Maximized state must be restored");
      form.Close();
     }
