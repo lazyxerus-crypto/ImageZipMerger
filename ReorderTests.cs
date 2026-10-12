@@ -20,6 +20,7 @@ class ReorderTests {
  static int ScrollRight(ListBox list){SendMessage(list.Handle,0x114,new IntPtr(7),IntPtr.Zero);int x=GetScrollPos(list.Handle,0);Assert(x>0,"Horizontal scrollbar must be scrollable");return x;}
  [STAThread] static void Main(){
   string dir=Path.Combine(Path.GetTempPath(),"ImageZipMerger-tests-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(dir);
+  AppSettings.CustomPath=Path.Combine(dir,"test-settings.txt");
   try {
    string source=Path.Combine(dir,"source.zip");
    using(var zip=ZipFile.Open(source,ZipArchiveMode.Create))for(int i=0;i<5;i++)using(var stream=zip.CreateEntry(new string('x',100)+i+".png").Open())using(var bitmap=new Bitmap(2+i,2)){bitmap.Save(stream,System.Drawing.Imaging.ImageFormat.Png);}
@@ -45,6 +46,7 @@ class ReorderTests {
     form.Close();
    }
    WorkflowTests.Run(dir,source);
+   PreviewCleanupTests.Run(dir);
    Console.WriteLine("PASS: button/multi-selection/boundaries/hidden excluded/drag/restore/scroll/export/source preservation");
   }finally{Directory.Delete(dir,true);}
  }

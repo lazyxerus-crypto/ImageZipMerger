@@ -20,6 +20,90 @@ class Natural : IComparer<string> {
  [DllImport("shlwapi.dll", CharSet=CharSet.Unicode)] static extern int StrCmpLogicalW(string a,string b);
  public int Compare(string a,string b) { return StrCmpLogicalW(a,b); }
 }
+static class AppSettings {
+ public static string CustomPath;
+ public static string SettingsPath { get { return CustomPath!=null?CustomPath:Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),"ImageZipMerger","settings.txt"); } }
+ public static bool LoadAutoCleanup() { return LoadAutoCleanupFrom(SettingsPath); }
+ public static bool LoadAutoCleanupFrom(string path) {
+  try {
+   if(string.IsNullOrEmpty(path)||!File.Exists(path))return false;
+   foreach(string line in File.ReadAllLines(path)) {
+    string t=line.Trim();if(t.Length==0||t.StartsWith("#")||t.StartsWith(";"))continue;
+    int eq=t.IndexOf('=');if(eq<0)continue;
+    if(t.Substring(0,eq).Trim().Equals("AutoCleanup",StringComparison.OrdinalIgnoreCase)) {
+     string v=t.Substring(eq+1).Trim();return v=="1"||v.Equals("true",StringComparison.OrdinalIgnoreCase);
+    }
+   }
+   return false;
+  } catch { return false; }
+ }
+ public static void SaveAutoCleanup(bool value) { SaveAutoCleanupTo(SettingsPath,value); }
+ public static void SaveAutoCleanupTo(string path,bool value) {
+  try {
+   var map=ReadAll(path);map["AutoCleanup"]=value?"1":"0";WriteAll(path,map);
+  } catch {}
+ }
+ public struct WindowPlacement { public int Width,Height; public bool Maximized; }
+ public static WindowPlacement DefaultPlacement { get { return new WindowPlacement {Width=936,Height=970,Maximized=false}; } }
+ public static WindowPlacement LoadWindowPlacement() { return LoadWindowPlacementFrom(SettingsPath); }
+ public static WindowPlacement LoadWindowPlacementFrom(string path) {
+  var placement=DefaultPlacement;
+  try {
+   var map=ReadAll(path);
+   string w,h,m;int pw,ph;
+   if(map.TryGetValue("Width",out w)&&int.TryParse(w,out pw))placement.Width=pw;
+   if(map.TryGetValue("Height",out h)&&int.TryParse(h,out ph))placement.Height=ph;
+   if(map.TryGetValue("Maximized",out m))placement.Maximized=m=="1"||m.Equals("true",StringComparison.OrdinalIgnoreCase);
+   if(placement.Width<100||placement.Width>10000||placement.Height<100||placement.Height>10000)placement=DefaultPlacement;
+  } catch { placement=DefaultPlacement; }
+  return placement;
+ }
+ public static void SaveWindowPlacement(int width,int height,bool maximized) { SaveWindowPlacementTo(SettingsPath,width,height,maximized); }
+ public static void SaveWindowPlacementTo(string path,int width,int height,bool maximized) {
+  try {
+   var map=ReadAll(path);map["Width"]=width.ToString();map["Height"]=height.ToString();map["Maximized"]=maximized?"1":"0";WriteAll(path,map);
+  } catch {}
+ }
+ public static int ClampSize(int value,int min,int max) { if(value<min)return min; if(max>0&&value>max)return max; return value; }
+ static Dictionary<string,string> ReadAll(string path) {
+  var map=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
+  try {
+   if(string.IsNullOrEmpty(path)||!File.Exists(path))return map;
+   foreach(string line in File.ReadAllLines(path)) {
+    string t=line.Trim();if(t.Length==0||t.StartsWith("#")||t.StartsWith(";"))continue;
+    int eq=t.IndexOf('=');if(eq<0)continue;
+    string key=t.Substring(0,eq).Trim(),val=t.Substring(eq+1).Trim();
+    if(key.Length>0)map[key]=val;
+   }
+  } catch {}
+  return map;
+ }
+ static void WriteAll(string path,Dictionary<string,string> map) {
+  if(string.IsNullOrEmpty(path))return;
+  string dir=Path.GetDirectoryName(path);if(!string.IsNullOrEmpty(dir)&&!Directory.Exists(dir))Directory.CreateDirectory(dir);
+  var lines=new List<string>();
+  foreach(var kv in map)lines.Add(kv.Key+"="+kv.Value);
+  File.WriteAllLines(path,lines.ToArray());
+ }
+ public static bool IsSamePath(string a,string b) {
+  try {
+   if(string.IsNullOrEmpty(a)||string.IsNullOrEmpty(b))return false;
+   string fa=Path.GetFullPath(a).TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar);
+   string fb=Path.GetFullPath(b).TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar);
+   return string.Equals(fa,fb,StringComparison.OrdinalIgnoreCase);
+  } catch { return string.Equals(a,b,StringComparison.OrdinalIgnoreCase); }
+ }
+ public static bool VerifyOutputZip(string path) {
+  try {
+   if(string.IsNullOrEmpty(path)||!File.Exists(path))return false;
+   using(var z=ZipFile.OpenRead(path)) {
+    if(z.Entries.Count==0)return false;
+    foreach(var e in z.Entries) using(var s=e.Open()) { byte[] buf=new byte[8192]; while(s.Read(buf,0,buf.Length)>0) {} }
+   }
+   return true;
+  } catch { return false; }
+ }
+}
 class Merger : Form {
  [DllImport("user32.dll")] static extern int GetScrollPos(IntPtr window,int bar);
  [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr window,int message,IntPtr wParam,IntPtr lParam);
@@ -27,6 +111,8 @@ class Merger : Form {
  EpisodeListBox episodes = new EpisodeListBox(); PageListBox pages = new PageListBox();
  PictureBox preview = new PictureBox(); TextBox name = new TextBox();
  Label status = new Label(), detail = new Label(); CheckBox excluded = new CheckBox();
+ Panel previewWrap, previewBox; CheckBox autoCleanup; bool autoCleanupOn, autoCleanupRunning;
+ bool suppressPlacementSave=true; int savedPlacementW, savedPlacementH; bool savedPlacementMax;
  List<Episode> data = new List<Episode>(); Stack<List<PageItem>> undo = new Stack<List<PageItem>>();
  bool refreshing, busy;
  PageItem previewPage;
@@ -43,11 +129,16 @@ class Merger : Form {
  Point pageDragStart; List<PageItem> draggedPages; Episode pageDragEpisode; int pageInsertAt=-1;
  readonly string pageDragFormat="ImageZipMerger.Page."+Guid.NewGuid().ToString("N");
  public Merger() {
-  Text="이미지 ZIP 합치기 v1.10"; Size=new Size(1180,800); MinimumSize=new Size(950,620); Font=new Font("맑은 고딕",10); StartPosition=FormStartPosition.CenterScreen; BackColor=Color.FromArgb(245,247,250); AutoScaleMode=AutoScaleMode.Font;
+  Text="이미지 ZIP 합치기 v1.11"; Size=new Size(936,970); MinimumSize=new Size(936,620); Font=new Font("맑은 고딕",10); StartPosition=FormStartPosition.CenterScreen; BackColor=Color.FromArgb(245,247,250); AutoScaleMode=AutoScaleMode.Font;
   var root=new TableLayoutPanel { Dock=DockStyle.Fill, RowCount=4, ColumnCount=1, Padding=new Padding(12) };
   root.RowStyles.Add(new RowStyle(SizeType.Absolute,48)); root.RowStyles.Add(new RowStyle(SizeType.Percent,100)); root.RowStyles.Add(new RowStyle(SizeType.Absolute,32));root.RowStyles.Add(new RowStyle(SizeType.Absolute,84)); Controls.Add(root);
   var top=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false}; root.Controls.Add(top,0,0);
   AddButton(top,"압축파일 추가",AddFiles); AddButton(top,"ZIP으로 저장",Save); AddButton(top,"삭제 취소",Undo);
+  autoCleanupOn=AppSettings.LoadAutoCleanup();
+  autoCleanup=new CheckBox {Text="ZIP 저장 후 자동 정리",Checked=autoCleanupOn,AutoSize=true,Padding=new Padding(12,8,0,0)};
+  fileTips.SetToolTip(autoCleanup,"저장 완료 후 원본 압축파일을 삭제하고 대기 회차를 비웁니다.");
+  autoCleanup.CheckedChanged+=delegate {autoCleanupOn=autoCleanup.Checked;AppSettings.SaveAutoCleanup(autoCleanupOn);};
+  top.Controls.Add(autoCleanup);
   top.Controls.Add(new Label {Text="ZIP / CBZ · 파일을 창으로 끌어와도 됩니다",AutoSize=true,Padding=new Padding(12,9,0,0)});
   var body=new TableLayoutPanel {Dock=DockStyle.Fill, ColumnCount=3,RowCount=1}; body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,38)); body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,20)); body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,42)); root.Controls.Add(body,0,1);
   var left=Column(body,0,"1. 회차 선택","빈 공간 드래그로 여러 회차 선택 · Delete로 빼기");
@@ -63,7 +154,7 @@ class Merger : Form {
   var pageOrder=Grid(2);pageOrder.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));pageOrder.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));pageOrder.Controls.Add(ActionButton("↑ 위로",delegate {MovePages(-1);}),0,0);pageOrder.Controls.Add(ActionButton("↓ 아래로",delegate {MovePages(1);}),1,0);pgControls.Controls.Add(pageOrder,0,1);
   excluded.Text="제외 이미지 표시";excluded.AutoSize=false;excluded.Dock=DockStyle.Fill;excluded.Margin=new Padding(0);pgControls.Controls.Add(excluded,0,2);excluded.CheckedChanged+=delegate {RefreshPages();};
   fileTips.SetToolTip(pageOrder,"선택한 이미지들을 함께 이동합니다. Alt+↑ / Alt+↓로도 이동할 수 있습니다.");
-  var right=Column(body,2,"3. 이미지 미리보기","회차 선택 시 첫 페이지 자동 표시"); preview.Dock=DockStyle.Fill; preview.SizeMode=PictureBoxSizeMode.Zoom; preview.BackColor=Color.FromArgb(232,236,242); right.Controls.Add(preview,0,1);detail.Dock=DockStyle.Fill;detail.Padding=new Padding(0,10,0,0);detail.AutoEllipsis=true;right.Controls.Add(detail,0,2);
+  var right=Column(body,2,"3. 이미지 미리보기","회차 선택 시 첫 페이지 자동 표시"); preview.SizeMode=PictureBoxSizeMode.Zoom; preview.Dock=DockStyle.Fill; preview.BackColor=Color.FromArgb(232,236,242); previewWrap=new Panel {Dock=DockStyle.Fill,BackColor=Color.FromArgb(245,247,250)}; previewBox=new Panel {BackColor=Color.FromArgb(232,236,242)}; previewBox.Controls.Add(preview); previewWrap.Controls.Add(previewBox); previewWrap.SizeChanged+=delegate {LayoutPreview();}; right.Controls.Add(previewWrap,0,1);detail.Dock=DockStyle.Fill;detail.Padding=new Padding(0,10,0,0);detail.AutoEllipsis=true;right.Controls.Add(detail,0,2); LayoutPreview();
   status.Dock=DockStyle.Fill; status.TextAlign=ContentAlignment.MiddleLeft; root.Controls.Add(status,0,2);
   log.Dock=DockStyle.Fill;log.IntegralHeight=false;log.DrawMode=DrawMode.OwnerDrawFixed;log.ItemHeight=Font.Height+3;log.HorizontalScrollbar=true;
   log.DrawItem+=delegate(object sender,DrawItemEventArgs e){if(e.Index<0)return;e.DrawBackground();var item=(LogEntry)log.Items[e.Index];TextRenderer.DrawText(e.Graphics,item.Text,e.Font,e.Bounds,(e.State&DrawItemState.Selected)!=0?SystemColors.HighlightText:item.Color,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine|TextFormatFlags.NoPrefix);};root.Controls.Add(log,0,3);
@@ -74,7 +165,9 @@ class Merger : Form {
   episodes.KeyDown+=delegate(object sender,KeyEventArgs e) {if(busy)return;if(e.KeyCode==Keys.Delete){RemoveEpisode();e.SuppressKeyPress=true;}if(e.Control && e.KeyCode==Keys.A){refreshing=true;for(int i=0;i<episodes.Items.Count;i++)episodes.SetSelected(i,true);refreshing=false;name.Text=Current==null?"":Current.Name;RefreshPages();e.SuppressKeyPress=true;}};
   pages.SelectedIndexChanged+=delegate {if(!refreshing)ShowPreview();}; pages.KeyDown+=delegate(object s,KeyEventArgs e) {if(busy)return;if(e.Alt && (e.KeyCode==Keys.Up || e.KeyCode==Keys.Down)){MovePages(e.KeyCode==Keys.Up?-1:1);e.SuppressKeyPress=true;return;}if(e.KeyCode==Keys.Delete) {Delete();e.SuppressKeyPress=true;} if(e.Control && e.KeyCode==Keys.A) {refreshing=true;try {for(int i=0;i<pages.Items.Count;i++) pages.SetSelected(i,true);}finally {refreshing=false;}ShowPreview();e.SuppressKeyPress=true;}};
   AllowDrop=true; DragEnter+=delegate(object s,DragEventArgs e) {if(!busy && e.Data.GetDataPresent(DataFormats.FileDrop)) e.Effect=DragDropEffects.Copy;}; DragDrop+=delegate(object s,DragEventArgs e) {if(!busy) LoadFiles((string[])e.Data.GetData(DataFormats.FileDrop));};
-  FormClosing+=delegate(object s,FormClosingEventArgs e) {if(busy) {e.Cancel=true; Log("저장이 끝난 뒤 닫아 주세요.",Color.DarkOrange);}}; UpdateStatus();
+  FormClosing+=delegate(object s,FormClosingEventArgs e) {if(busy) {e.Cancel=true; Log("저장이 끝난 뒤 닫아 주세요.",Color.DarkOrange);} else SavePlacement();};
+  Resize+=delegate {if(!suppressPlacementSave)SavePlacement();};
+  RestorePlacement(); suppressPlacementSave=false; UpdateStatus();
  }
  void EnableFileTips(ListBox list) {
   list.MouseMove+=delegate(object sender,MouseEventArgs e) {
@@ -288,6 +381,52 @@ class Merger : Form {
  void Restore() {foreach(var p in pages.SelectedItems.Cast<PageItem>())p.Removed=false;RefreshEpisodesAtPosition(episodes.SelectedIndex,true);}
  void Undo() {if(undo.Count==0)return;foreach(var p in undo.Pop())p.Removed=false;RefreshEpisodesAtPosition(episodes.SelectedIndex,true);}
  void ClearPreview() {previewPage=null;var old=preview.Image;preview.Image=null;if(old!=null)old.Dispose();detail.Text="";}
+  void LayoutPreview() {
+  if(previewWrap==null||previewBox==null)return;
+  int availW=previewWrap.ClientSize.Width,availH=previewWrap.ClientSize.Height;
+  if(availW<=0||availH<=0)return;
+  // Fit the 1:1.41 container inside the available space and center it.
+  // Never resize the form here: when the window is short, shrink the
+  // preview instead so nothing is clipped and no resize loop occurs.
+  // The image itself keeps its ratio via PictureBoxSizeMode.Zoom.
+  int w=availW,h=(int)Math.Round(w*1.41);
+  if(h>availH){h=availH;w=(int)Math.Round(h/1.41);}
+  if(w>availW){w=availW;h=(int)Math.Round(w*1.41);}
+  if(w<1)w=1;if(h<1)h=1;
+  if(w>availW)w=availW;if(h>availH)h=availH;
+  previewBox.Bounds=new Rectangle((availW-w)/2,(availH-h)/2,w,h);
+ }
+ Rectangle WorkingArea() {
+  try{return Screen.FromControl(this).WorkingArea;}catch{}
+  try{return Screen.PrimaryScreen.WorkingArea;}catch{}
+  return new Rectangle(0,0,1920,1040);
+ }
+ void RestorePlacement() {
+  AppSettings.WindowPlacement p;
+  try{p=AppSettings.LoadWindowPlacement();}catch{p=AppSettings.DefaultPlacement;}
+  Rectangle area=WorkingArea();
+  int w=AppSettings.ClampSize(p.Width,MinimumSize.Width,area.Width);
+  int h=AppSettings.ClampSize(p.Height,MinimumSize.Height,area.Height);
+  Size=new Size(w,h);
+  try{if(p.Maximized)WindowState=FormWindowState.Maximized;}catch{}
+  // Baseline is the restored file values, not the live size: LayoutPreview
+  // may grow the form synchronously inside the Size setter above, and that
+  // grown size must still be saved on close.
+  savedPlacementW=w; savedPlacementH=h; savedPlacementMax=p.Maximized;
+ }
+ void SavePlacement() {
+  try{
+   int w,h;bool max;
+   if(WindowState==FormWindowState.Maximized){max=true;w=RestoreBounds.Width;h=RestoreBounds.Height;}
+   else{max=false;w=Width;h=Height;if(WindowState==FormWindowState.Minimized){w=RestoreBounds.Width;h=RestoreBounds.Height;}}
+   Rectangle area=WorkingArea();
+   w=AppSettings.ClampSize(w,MinimumSize.Width,area.Width);
+   h=AppSettings.ClampSize(h,MinimumSize.Height,area.Height);
+   if(w==savedPlacementW&&h==savedPlacementH&&max==savedPlacementMax)return;
+   savedPlacementW=w;savedPlacementH=h;savedPlacementMax=max;
+   AppSettings.SaveWindowPlacement(w,h,max);
+  }catch{}
+ }
  void ShowPreview() {
   var p=pages.SelectedItem as PageItem;
   if(p!=null && ReferenceEquals(previewPage,p) && preview.Image!=null){UpdatePreviewDetail(p);return;}
@@ -295,9 +434,50 @@ class Merger : Form {
   try {
    Bitmap next;using(var z=ZipFile.OpenRead(p.Archive)) {if(p.Index<0 || p.Index>=z.Entries.Count || z.Entries[p.Index].FullName!=p.Entry)throw new IOException("원본 파일이 변경되었습니다. 다시 추가해 주세요.");using(var stream=z.Entries[p.Index].Open())next=ModernImage.Decode(stream,Path.GetExtension(p.Entry));}
    var old=preview.Image;preview.Image=next;previewPage=p;if(old!=null)old.Dispose();UpdatePreviewDetail(p);
-  }catch(Exception ex){ClearPreview();detail.Text=p.Entry+"\n미리보기 실패: "+ex.Message;}
+  }catch(Exception ex){ClearPreview();detail.Text="미리보기 실패: "+ex.Message;}
  }
- void UpdatePreviewDetail(PageItem p) {detail.Text=p.Entry+"\n"+preview.Image.Width+" × "+preview.Image.Height+"\n선택 "+pages.SelectedItems.Count+"장 · Delete 키로 제외";}
+ void UpdatePreviewDetail(PageItem p) {detail.Text="";}
+ public static List<string> CollectSourceArchives(List<Episode> items) {
+  var result=new List<string>();var seen=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+  if(items==null)return result;
+  foreach(var ep in items) {
+   if(ep==null||ep.Pages==null)continue;
+   foreach(var p in ep.Pages) {
+    if(p==null||p.Removed||string.IsNullOrEmpty(p.Archive))continue;
+    string full;try {full=Path.GetFullPath(p.Archive);}catch{continue;}
+    if(seen.Add(full))result.Add(full);
+   }
+  }
+  return result;
+ }
+ bool PerformAutoCleanup(string destination,List<string> sources) {
+  if(autoCleanupRunning)return false;
+  autoCleanupRunning=true;
+  try {
+   if(sources==null||sources.Count==0)return false;
+   if(data.Count==0)return false;
+   string fullDest;try {fullDest=Path.GetFullPath(destination);}catch{Log("자동 정리 실패: 저장 경로를 확인할 수 없어 원본을 유지합니다.",Color.Firebrick);return false;}
+   if(!File.Exists(fullDest)){Log("자동 정리 실패: 저장된 ZIP을 찾을 수 없어 원본을 유지합니다.",Color.Firebrick);return false;}
+   if(!AppSettings.VerifyOutputZip(fullDest)){Log("자동 정리 실패: 저장된 ZIP 검증에 실패해 원본을 유지합니다.",Color.Firebrick);return false;}
+   var targets=new List<string>();var seen=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+   foreach(string s in sources) {
+    if(string.IsNullOrEmpty(s))continue;
+    string full;try {full=Path.GetFullPath(s);}catch{continue;}
+    if(AppSettings.IsSamePath(full,fullDest))continue;
+    if(!seen.Add(full))continue;
+    targets.Add(full);
+   }
+   if(targets.Count==0){Log("자동 정리를 건너뛰었습니다: 출력 파일과 원본 경로가 겹쳐 삭제를 차단했습니다.",Color.DarkOrange);return false;}
+   var failed=new List<string>();
+   foreach(string t in targets) {
+    try {if(File.Exists(t))File.Delete(t);}catch(Exception ex){failed.Add(Path.GetFileName(t)+": "+ex.Message);}
+   }
+   if(failed.Count>0){Log("자동 정리 실패: "+string.Join(", ",failed.ToArray())+" — 대기 회차를 유지합니다.",Color.Firebrick);return false;}
+   ClearPreview();undo.Clear();data.Clear();RefreshEpisodes(0);
+   Log("자동 정리 완료: 원본 "+targets.Count+"개 삭제, 대기 회차를 비웠습니다.",Color.ForestGreen);
+   return true;
+  } finally {autoCleanupRunning=false;}
+ }
  public static Episode Export(List<Episode> items,string destination) {
   if(!items.Any(ep=>ep.Pages.Any(p=>!p.Removed)))throw new IOException("저장할 이미지가 없습니다.");
   string full=Path.GetFullPath(destination),temp=full+"."+Guid.NewGuid().ToString("N")+".tmp";
@@ -329,11 +509,16 @@ class Merger : Form {
   if(!data.Any(ep=>ep.Pages.Any(p=>!p.Removed))){Log("저장할 이미지를 추가해 주세요.",Color.DarkOrange);return;}
   using(var d=new SaveFileDialog {Filter="ZIP 압축파일|*.zip",FileName=DefaultSaveName,DefaultExt="zip",AddExtension=true,OverwritePrompt=true}) {
    if(d.ShowDialog()!=DialogResult.OK)return;
-   bool replacesSource=IsSourceDestination(d.FileName);busy=true;Enabled=false;Log("ZIP 저장 중: "+d.FileName,Color.RoyalBlue);
+   bool replacesSource=IsSourceDestination(d.FileName);
+   List<string> cleanupSources=CollectSourceArchives(data);
+   string destination;try {destination=Path.GetFullPath(d.FileName);}catch{destination=d.FileName;}
+   bool wantCleanup=autoCleanupOn;busy=true;Enabled=false;Log("ZIP 저장 중: "+d.FileName,Color.RoyalBlue);
    try {
     var saved=await Task.Run(()=>Export(data,d.FileName));
     if(replacesSource){AdoptSavedResult(saved);Log("원본을 덮어쓰고 저장 결과를 새 작업으로 불러왔습니다. 이전 삭제 취소 기록은 초기화했습니다.",Color.DarkOrange);}
     Log("저장 완료: "+d.FileName,Color.ForestGreen);
+    if(wantCleanup&&!replacesSource)PerformAutoCleanup(destination,cleanupSources);
+    else if(wantCleanup&&replacesSource)Log("자동 정리를 건너뛰었습니다: 출력 파일과 원본 경로가 겹쳐 삭제를 차단했습니다.",Color.DarkOrange);
    }catch(Exception ex){Log("저장 실패: "+ex.Message,Color.Firebrick);}
    finally {busy=false;Enabled=true;UpdateStatus();}
   }
