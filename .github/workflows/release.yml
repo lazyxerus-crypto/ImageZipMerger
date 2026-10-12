@@ -16,7 +16,20 @@ jobs:
           node-version: '22'
       - name: Run regression tests
         shell: pwsh
-        run: ./test.ps1
+        run: |
+          $output = New-Object System.Collections.ArrayList
+          try {
+            & ./test.ps1 2>&1 | ForEach-Object { $output.Add($_.ToString()) | Out-Null; Write-Output $_ }
+          } catch {
+            $output.Add("THROW: " + $_.Exception.Message) | Out-Null
+          }
+          $failed = @($output | Where-Object { $_ -match 'Test compilation failed|Reorder regression tests failed|THROW:' }).Count -gt 0
+          if ($failed) {
+            $detail = (($output | ForEach-Object { $_ } | Where-Object { $_ -match 'Exception:' } | Select-Object -Last 2) -join ' / ')
+            if ([string]::IsNullOrEmpty($detail)) { $detail = 'regression tests failed' }
+            Write-Output ("::error::" + $detail)
+            exit 1
+          }
       - name: Build application and package dependencies
         shell: pwsh
         run: ./build.ps1
