@@ -15,6 +15,8 @@ static class PreviewCleanupTests {
  static void Assert(bool ok,string message){if(!ok)throw new Exception(message);}
  static int UndoCount(Merger m){var u=Field(m,"undo");return (int)u.GetType().GetProperty("Count").GetValue(u,null);}
  static void PumpLayout(Form f){for(int i=0;i<4;i++)f.PerformLayout();}
+ static void ExpectClamped(int reqW,int reqH,Form form,Rectangle area,out int ew,out int eh){ExpectClamped(reqW,reqH,form.MinimumSize.Width,form.MinimumSize.Height,area,out ew,out eh);}
+ static void ExpectClamped(int reqW,int reqH,int minW,int minH,Rectangle area,out int ew,out int eh){ew=AppSettings.ClampSize(reqW,minW,area.Width);eh=AppSettings.ClampSize(reqH,minH,area.Height);}
  static string MakeImageZip(string path,int w,int h) {
   using(var zip=ZipFile.Open(path,ZipArchiveMode.Create))
    for(int i=0;i<2;i++) using(var s=zip.CreateEntry("img"+i+".png").Open()) using(var b=new Bitmap(w+i,h)) b.Save(s,System.Drawing.Imaging.ImageFormat.Png);
@@ -205,7 +207,8 @@ static class PreviewCleanupTests {
    Assert(AppSettings.ClampSize(50,936,1920)==936,"Clamp min failed");
    Assert(AppSettings.ClampSize(5000,936,1920)==1920,"Clamp max failed");
    Assert(AppSettings.ClampSize(1200,936,1920)==1200,"Clamp mid failed");
-   // No settings file: default size applies and the preview still fits.
+   // No settings file: default size applies (clamped to the working area on
+   // small screens) and the preview still fits.
    {
     string nofile=Path.Combine(dir,"no-such-settings.txt");
     if(File.Exists(nofile))File.Delete(nofile);
@@ -213,7 +216,8 @@ static class PreviewCleanupTests {
     try{
      using(var form=new Merger()){
       form.ShowInTaskbar=false;form.Opacity=0;form.Show();PumpLayout(form);
-      Assert(form.Width==936 && form.Height==970,"Default size must be 936x970, got "+form.Width+"x"+form.Height);
+      int ew,eh;ExpectClamped(936,970,form,Screen.FromControl(form).WorkingArea,out ew,out eh);
+      Assert(form.Width==ew && form.Height==eh,"Default size must apply (area-aware), got "+form.Width+"x"+form.Height+" expected "+ew+"x"+eh);
       var dwrap=(Panel)Field(form,"previewWrap");var dbox=(Panel)Field(form,"previewBox");
       Assert(dbox.Width<=dwrap.ClientSize.Width && dbox.Height<=dwrap.ClientSize.Height,"Default preview must fit without clipping");
       double dratio=(double)dbox.Width/(double)dbox.Height;
@@ -227,30 +231,37 @@ static class PreviewCleanupTests {
    AppSettings.SaveAutoCleanupTo(iso,true);
    string oldCustom=AppSettings.CustomPath;AppSettings.CustomPath=iso;
    try{
+    int w1,h1;
     using(var form=new Merger()){
      form.ShowInTaskbar=false;form.Opacity=0;form.Show();PumpLayout(form);
-     Assert(form.Width==1000 && form.Height==700,"Restored size must apply exactly, got "+form.Width+"x"+form.Height);
-     form.Close();
+     int ew,eh;ExpectClamped(1000,700,form,Screen.FromControl(form).WorkingArea,out ew,out eh);
+     Assert(form.Width==ew && form.Height==eh,"Restored size must apply (area-aware), got "+form.Width+"x"+form.Height+" expected "+ew+"x"+eh);
+     w1=form.Width;h1=form.Height;form.Close();
     }
     rp=AppSettings.LoadWindowPlacementFrom(iso);
-    Assert(rp.Width==1000&&rp.Height==700&&!rp.Maximized,"Close must save last size, got "+rp.Width+"x"+rp.Height);
+    Assert(rp.Width==w1&&rp.Height==h1&&!rp.Maximized,"Close must save last size, got "+rp.Width+"x"+rp.Height);
     Assert(AppSettings.LoadAutoCleanupFrom(iso),"Close save must preserve AutoCleanup");
+    int w2,h2;
     using(var form=new Merger()){
      form.ShowInTaskbar=false;form.Opacity=0;form.Show();PumpLayout(form);
-     Assert(form.Width==1000&&form.Height==700,"Saved size must be stable across restarts");
-     form.Size=new Size(1100,700);PumpLayout(form);
-     Assert(form.Width==1100 && form.Height==700,"Resize must apply without auto-growth");
+     Assert(form.Width==w1&&form.Height==h1,"Saved size must be stable across restarts");
+     form.Size=new Size(1100,h1);PumpLayout(form);
+     Assert(form.Width==1100,"Resize must apply");
+     w2=form.Width;h2=form.Height;
+     Rectangle area2=Screen.FromControl(form).WorkingArea;Size min2=form.MinimumSize;
      form.Close();
+     int ew2,eh2;ExpectClamped(w2,h2,min2.Width,min2.Height,area2,out ew2,out eh2);
      rp=AppSettings.LoadWindowPlacementFrom(iso);
-     Assert(rp.Width==1100&&rp.Height==700&&!rp.Maximized,"Resize must be saved exactly");
+     Assert(rp.Width==ew2&&rp.Height==eh2&&!rp.Maximized,"Resize must be saved (area-aware), got "+rp.Width+"x"+rp.Height+" expected "+ew2+"x"+eh2);
     }
+    int bw=rp.Width,bh=rp.Height;
     using(var form=new Merger()){
      form.ShowInTaskbar=false;form.Opacity=0;form.Show();PumpLayout(form);
      form.WindowState=FormWindowState.Maximized;PumpLayout(form);form.Close();
     }
     rp=AppSettings.LoadWindowPlacementFrom(iso);
     Assert(rp.Maximized,"Maximized must be saved on close");
-    Assert(rp.Width==1100,"Normal width must be kept when maximized");
+    Assert(rp.Width==bw&&rp.Height==bh,"Normal size must be kept when maximized, got "+rp.Width+"x"+rp.Height);
     using(var form=new Merger()){
      // NOTE: do not set ShowInTaskbar here: that recreates the window handle
      // and drops a ctor-restored maximized state (test-only artifact; the
@@ -260,7 +271,7 @@ static class PreviewCleanupTests {
      form.Close();
     }
     rp=AppSettings.LoadWindowPlacementFrom(iso);
-    Assert(rp.Maximized&&rp.Width==1100,"Maximized restore must not clobber saved size");
+    Assert(rp.Maximized&&rp.Width==bw&&rp.Height==bh,"Maximized restore must not clobber saved size");
    }finally{AppSettings.CustomPath=oldCustom;}
   }
   Console.WriteLine("PASS: preview ratio/guidance removal/original ratio/settings default+persist/off preserves/success cleanup/failure preserve/partial safety");
