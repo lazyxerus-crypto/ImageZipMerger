@@ -17,6 +17,8 @@ static class PreviewCleanupTests {
  static void PumpLayout(Form f){for(int i=0;i<4;i++)f.PerformLayout();}
  static void ExpectClamped(int reqW,int reqH,Form form,Rectangle area,out int ew,out int eh){ExpectClamped(reqW,reqH,form.MinimumSize.Width,form.MinimumSize.Height,area,out ew,out eh);}
  static void ExpectClamped(int reqW,int reqH,int minW,int minH,Rectangle area,out int ew,out int eh){ew=AppSettings.ClampSize(reqW,minW,area.Width);eh=AppSettings.ClampSize(reqH,minH,area.Height);}
+ // What a restored form actually shows: WinForms coerces below-minimum sizes up to MinimumSize.
+ static void ExpectFormSize(int reqW,int reqH,Form form,Rectangle area,out int ew,out int eh){int cw,ch;ExpectClamped(reqW,reqH,form,area,out cw,out ch);ew=Math.Max(cw,form.MinimumSize.Width);eh=Math.Max(ch,form.MinimumSize.Height);}
  static string MakeImageZip(string path,int w,int h) {
   using(var zip=ZipFile.Open(path,ZipArchiveMode.Create))
    for(int i=0;i<2;i++) using(var s=zip.CreateEntry("img"+i+".png").Open()) using(var b=new Bitmap(w+i,h)) b.Save(s,System.Drawing.Imaging.ImageFormat.Png);
@@ -207,6 +209,7 @@ static class PreviewCleanupTests {
    Assert(AppSettings.ClampSize(50,936,1920)==936,"Clamp min failed");
    Assert(AppSettings.ClampSize(5000,936,1920)==1920,"Clamp max failed");
    Assert(AppSettings.ClampSize(1200,936,1920)==1200,"Clamp mid failed");
+   {int tw,th;ExpectClamped(936,970,936,620,new Rectangle(0,0,800,600),out tw,out th);Assert(tw==800&&th==600,"Tiny-screen file clamp failed");Assert(Math.Max(tw,936)==936&&Math.Max(th,620)==620,"Tiny-screen form must show minimum size");}
    // No settings file: default size applies (clamped to the working area on
    // small screens) and the preview still fits.
    {
@@ -216,7 +219,7 @@ static class PreviewCleanupTests {
     try{
      using(var form=new Merger()){
       form.ShowInTaskbar=false;form.Opacity=0;form.Show();PumpLayout(form);
-      int ew,eh;ExpectClamped(936,970,form,Screen.FromControl(form).WorkingArea,out ew,out eh);
+      int ew,eh;ExpectFormSize(936,970,form,Screen.FromControl(form).WorkingArea,out ew,out eh);
       Assert(form.Width==ew && form.Height==eh,"Default size must apply (area-aware), got "+form.Width+"x"+form.Height+" expected "+ew+"x"+eh);
       var dwrap=(Panel)Field(form,"previewWrap");var dbox=(Panel)Field(form,"previewBox");
       Assert(dbox.Width<=dwrap.ClientSize.Width && dbox.Height<=dwrap.ClientSize.Height,"Default preview must fit without clipping");
@@ -234,7 +237,7 @@ static class PreviewCleanupTests {
     int w1,h1;
     using(var form=new Merger()){
      form.ShowInTaskbar=false;form.Opacity=0;form.Show();PumpLayout(form);
-     int ew,eh;ExpectClamped(1000,700,form,Screen.FromControl(form).WorkingArea,out ew,out eh);
+     int ew,eh;ExpectFormSize(1000,700,form,Screen.FromControl(form).WorkingArea,out ew,out eh);
      Assert(form.Width==ew && form.Height==eh,"Restored size must apply (area-aware), got "+form.Width+"x"+form.Height+" expected "+ew+"x"+eh);
      w1=form.Width;h1=form.Height;form.Close();
     }
